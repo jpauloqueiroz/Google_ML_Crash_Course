@@ -200,3 +200,202 @@ print("\n\nFeature data for compared chocolates " + str(chocsToCompare))
 print(choc_data_backup.loc[chocsToCompare[0]:chocsToCompare[1], :])
 
 
+#%% Run cell to setup functions.
+def dfSimilarity(df, centroids):
+  ### dfSimilarity = Calculate similarities for dataframe input
+  ### We need to calculate ||a-b||^2 = |a|^2 + |b|^2 - 2*|a|*|b|
+  ### Implement this with matrix operations
+  ### See the Appendix for further explanation
+  numPoints = len(df.index)
+  numCentroids = len(centroids.index)
+  ## Strictly speaking, we don't need to calculate the norm of points
+  # because it adds a constant bias to distances
+  # But calculating it so that the similarity doesn't go negative
+  # And that we expect similarities in [0,1] which aids debugging
+  pointNorms = np.square(nla.norm(df, axis=1))
+  pointNorms = np.reshape(pointNorms, [numPoints, 1])
+  ## Calculate the norm of centroids
+  centroidNorms = np.square(nla.norm(centroids, axis=1))
+  centroidNorms = np.reshape(centroidNorms, (1, numCentroids))
+  ## Calculate |a|^2 + |b|^2 - 2*|a|*|b|
+  similarities = pointNorms + centroidNorms - 2.0 * np.dot(
+      df, np.transpose(centroids))
+  # Divide by the number of features
+  # Which is 10 because the one-hot encoding means the "Maker" and "Bean" are
+  # weighted twice
+  similarities = similarities / 10.0
+  # numerical artifacts lead to negligible but negative values that go to NaN on the root
+  similarities = similarities.clip(min=0.0)
+  # Square root since it's ||a-b||^2
+  similarities = np.sqrt(similarities)
+  return similarities
+
+
+def initCentroids(df, k, feature_cols):
+  # Pick 'k' examples are random to serve as initial centroids
+  limit = len(df.index)
+  centroids_key = np.random.randint(0, limit - 1, k)
+  centroids = df.loc[centroids_key, feature_cols].copy(deep=True)
+  # the indexes get copied over so reset them
+  centroids.reset_index(drop=True, inplace=True)
+  return centroids
+
+
+def pt2centroid(df, centroids, feature_cols):
+  ### Calculate similarities between all points and centroids
+  ### And assign points to the closest centroid + save that distance
+  numCentroids = len(centroids.index)
+  numExamples = len(df.index)
+  # dfSimilarity = Calculate similarities for dataframe input
+  dist = dfSimilarity(df.loc[:, feature_cols], centroids.loc[:, feature_cols])
+  df.loc[:, 'centroid'] = np.argmin(dist, axis=1)  # closest centroid
+  df.loc[:, 'pt2centroid'] = np.min(dist, axis=1)  # minimum distance
+  return df
+
+
+def recomputeCentroids(df, centroids, feature_cols):
+  ### For every centroid, recompute it as an average of the points
+  ### assigned to it
+  numCentroids = len(centroids.index)
+  for cen in range(numCentroids):
+    dfSubset = df.loc[df['centroid'] == cen,
+                      feature_cols]  # all points for centroid
+    if not (dfSubset.empty):  # if there are points assigned to the centroid
+      clusterAvg = np.sum(dfSubset) / len(dfSubset.index)
+      centroids.loc[cen] = clusterAvg
+  return centroids
+
+
+def kmeans(df, k, feature_cols, verbose):
+  flagConvergence = False
+  maxIter = 100
+  iter = 0  # ensure kmeans doesn't run for ever
+  centroids = initCentroids(df, k, feature_cols)
+  while not (flagConvergence):
+    iter += 1
+    #Save old mapping of points to centroids
+    oldMapping = df['centroid'].copy(deep=True)
+    # Perform k-means
+    df = pt2centroid(df, centroids, feature_cols)
+    centroids = recomputeCentroids(df, centroids, feature_cols)
+    # Check convergence by comparing [oldMapping, newMapping]
+    newMapping = df['centroid']
+    flagConvergence = all(oldMapping == newMapping)
+    if verbose == 1:
+      print('Total distance:' + str(np.sum(df['pt2centroid'])))
+    if (iter > maxIter):
+      print('k-means did not converge! Reached maximum iteration limit of ' + str(maxIter) + '.')
+      sys.exit()
+      return
+  print ('k-means converged for ' + str(k) + ' clusters' + ' after ' + str(iter) + ' iterations!')
+  return [df, centroids]
+
+#%% 
+k = 35  #@param
+
+feature_cols = choc_data.columns.values  # save original columns
+# initialize every point to an impossible value, the k+1 cluster
+choc_data['centroid'] = k
+# init the point to centroid distance to an impossible value "2" (>1)
+choc_data['pt2centroid'] = 2
+[choc_data, centroids] = kmeans(choc_data, k, feature_cols, 1)
+print("Data for the first few chocolates, with 'centroid' and 'pt2centroid' on"
+      ' the extreme right:')
+choc_data.head()
+#%%
+clusterNumber = 7  #@param
+choc_data_backup.loc[choc_data['centroid'] == clusterNumber, :]
+
+#%% Run cell to set up functions { display-mode: "form" }.
+def clusterCardinality(df):
+  k = np.max(df['centroid']) + 1
+  k = k.astype(int)
+  print ('Number of clusters:' + str(k))
+  clCard = np.zeros(k)
+  for kk in range(k):
+    clCard[kk] = np.sum(df['centroid'] == kk)
+  clCard = clCard.astype(int)
+  # print "Cluster Cardinality:"+str(clCard)
+  plt.figure()
+  plt.bar(range(k), clCard)
+  plt.title('Cluster Cardinality')
+  plt.xlabel('Cluster Number: ' + str(0) + ' to ' + str(k - 1))
+  plt.ylabel('Points in Cluster')
+  return clCard
+
+
+def clusterMagnitude(df):
+  k = np.max(df['centroid']) + 1
+  k = k.astype(int)
+  cl = np.zeros(k)
+  clMag = np.zeros(k)
+  for kk in range(k):
+    idx = np.where(df['centroid'] == kk)
+    idx = idx[0]
+    clMag[kk] = np.sum(df.loc[idx, 'pt2centroid'])
+  # print "Cluster Magnitude:",clMag #precision set using np pref
+  plt.figure()
+  plt.bar(range(k), clMag)
+  plt.title('Cluster Magnitude')
+  plt.xlabel('Cluster Number: ' + str(0) + ' to ' + str(k - 1))
+  plt.ylabel('Total Point-to-Centroid Distance')
+  return clMag
+
+
+def plotCardVsMag(clCard, clMag):
+  plt.figure()
+  plt.scatter(clCard, clMag)
+  plt.xlim(xmin=0)
+  plt.ylim(ymin=0)
+  plt.title('Magnitude vs Cardinality')
+  plt.ylabel('Magnitude')
+  plt.xlabel('Cardinality')
+
+
+def clusterQualityMetrics(df):
+  clCard = clusterCardinality(df)
+  clMag = clusterMagnitude(df)
+  plotCardVsMag(clCard, clMag)
+
+clusterQualityMetrics(choc_data)
+
+#%% Plot loss vs number of clusters
+def lossVsClusters(kmin, kmax, kstep, choc_data):
+  kmax += 1  # include kmax-th cluster in range
+  kRange = range(kmin, kmax, kstep)
+  loss = np.zeros(len(kRange))
+  lossCtr = 0
+  for kk in kRange:
+    [choc_data, centroids] = kmeans(choc_data, kk, feature_cols, 0)
+    loss[lossCtr] = np.sum(choc_data['pt2centroid'])
+    lossCtr += 1
+  plt.scatter(kRange, loss)
+  plt.title('Loss vs Clusters Used')
+  plt.xlabel('Number of clusters')
+  plt.ylabel('Total Point-to-Centroid Distance')
+
+
+kmin = 5  # @param
+kmax = 80  # @param
+kstep = 2  # @param
+lossVsClusters(kmin, kmax, kstep, choc_data)
+
+
+# %%
+# Calculate distances between "A" point and "B" centroids to return
+# axb array where a_i,b_j distance is at (i,j) position
+A = np.array([[1, 2, 3],\
+              [3, 1, 2],\
+              [0, 0, 0]])
+A = A / np.max(A)
+B = np.array([[4, 5, 6],\
+              [6, 6, 6]])
+B = B / np.max(B)
+numPoints = A.shape[0]
+numCentroids = B.shape[0]
+pointNorms = np.reshape(nla.norm(A, axis=1)**2.0, [numPoints, 1])
+centroidNorms = np.reshape(nla.norm(B, axis=1)**2.0, (1, numCentroids))
+"""Distance matrix of size 'p' by 'c' where Distance between point 'p' and centroid 'c' is at (p,c)."""
+print (pointNorms + centroidNorms - 2.0 * np.dot(A, np.transpose(B)))
+
+# %%
