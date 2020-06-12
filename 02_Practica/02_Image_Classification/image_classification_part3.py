@@ -9,7 +9,7 @@ from tensorflow.keras import Model, layers
 from tensorflow.keras.applications.inception_v3 import InceptionV3
 from tensorflow.keras.optimizers import SGD
 
-import os, signal
+import os
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
@@ -174,5 +174,9 @@ plt.plot(epochs, val_loss)
 plt.title('Training and validation loss')
 
 
-#%% Clean.
-os.kill(os.getpid(), signal.SIGKILL)
+#%% Save the model
+# Save the entire model as a SavedModel.
+model.save('saved_model/my_model.h5')
+
+
+# %%
