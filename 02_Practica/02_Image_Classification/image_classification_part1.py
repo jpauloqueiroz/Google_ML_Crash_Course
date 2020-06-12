@@ -93,7 +93,7 @@ img_input = layers.Input(shape=(150, 150, 3))
 
 # First convolution extracts 16 filters that are 3x3
 # Convolution is followed by max-pooling layer with a 2x2 window
-x = layers.Conv2D(16, 3, activation='relu')(img_input)
+x = layers.Conv2D(16, 3, activation='relu')(img_input) 
 x = layers.MaxPooling2D(2)(x)
 
 # Second convolution extracts 32 filters that are 3x3
